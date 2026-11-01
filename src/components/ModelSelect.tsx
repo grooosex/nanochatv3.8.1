@@ -1,5 +1,5 @@
 import { GROK_MODELS, shortModelLabel } from "@/lib/constants";
-import { applyLlmPick, chatPickerModels } from "@/lib/llm-models";
+import { applyLlmPick, chatPickerModels, llmModelLabel, llmModelName } from "@/lib/llm-models";
 import { useApp } from "@/lib/store";
 import type { GrokModelId } from "@/lib/types";
 import { ExpandSelect } from "./ui-kit";
@@ -16,6 +16,7 @@ export function ChatModelSelect({
   const llmModel = useApp((s) => s.settings.llmModel);
   const starred = useApp((s) => s.settings.llmStarred);
   const available = useApp((s) => s.settings.llmModels);
+  const accounts = useApp((s) => s.settings.llmAccounts);
   const connected = useApp((s) => s.settings.llmConnected);
 
   if (source === "api") {
@@ -34,7 +35,12 @@ export function ChatModelSelect({
     return (
       <ExpandSelect
         value={llmModel || ids[0]}
-        options={ids.map((id) => ({ id, label: id, short: shortModelLabel(id) }))}
+        options={ids.map((id) => {
+          const full = llmModelLabel(id, accounts ?? [], available);
+          const name = llmModelName(id);
+          const short = full === name ? shortModelLabel(name) : `${shortModelLabel(name)}${full.slice(name.length)}`;
+          return { id, label: full, short };
+        })}
         onChange={(id) => useApp.getState().setSettings(applyLlmPick(useApp.getState().settings, id))}
         align={align}
         className={className}

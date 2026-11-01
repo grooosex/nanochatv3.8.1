@@ -251,6 +251,8 @@ export interface Chat {
   avatarBlobId?: string;
   customAvatarBlobId?: string;
   scrollTop: number;
+  /** 微信单独用的账号和模型。没有就是跟主聊天一样。 */
+  wechatAi?: WechatAi;
   /** @deprecated lifted into Settings.imageModelId */
   imageModelId?: string | null;
   /** @deprecated lifted into Settings.imageModelPin */
@@ -260,8 +262,10 @@ export interface Chat {
   bgFade?: number;
   /** 这个聊天正文要不要纯色底。没设过就跟总设置。 */
   textPlate?: boolean;
-  /** 微信单独用的账号和模型。没有就是跟主聊天一样。 */
-  wechatAi?: WechatAi;
+  /** 普通聊天没有这个字段。绘语工坊里的两种助手。 */
+  kind?: "assistant" | "card";
+  /** 助手自己的要求。只进这一个助手的提示词。 */
+  brief?: string;
 }
 
 export interface Folder {
@@ -271,6 +275,8 @@ export interface Folder {
   collapsed: boolean;
   order: number;
   createdAt: number;
+  /** 绘语工坊里的文件夹。外面的列表看不到。 */
+  place?: "workshop";
 }
 
 export interface CharacterCard {
@@ -405,6 +411,8 @@ export interface Settings {
   llmModels: string[];
   llmStarred: string[];
   llmAccounts: LlmAccount[];
+  /** 同时登录的账号。少于两个就是原来的单连接。 */
+  llmActiveIds?: string[];
   llmParams: LlmParams;
   /** Last successfully connected API account; used to reset 配图 AI on account switch. */
   llmIdentity?: string;
@@ -433,6 +441,12 @@ export interface Settings {
   chatImage: boolean;
   /** 点亮（默认）多人总提示可以有 1boy。熄灭只扣模型刚写的总提示。 */
   allowMulti1boy?: boolean;
+  /** 以后新建的写卡助手用这张头像。 */
+  workshopCardAvatar?: string;
+  /** 以后新建的绘语助理用这张头像。 */
+  workshopAssistAvatar?: string;
+  /** 旧状态栏已换成新模板。只在第一次打开时用，之后不再扫。 */
+  statusBarMigrated?: boolean;
   /** null/unset = 与聊天一致. Global, not per-chat. */
   imageModelId?: string | null;
   /** Last explicit API pick for 配图 AI; kept at the end of the list on Grok. */

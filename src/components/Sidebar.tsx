@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AlignJustify,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Folder as FolderIcon,
   FolderInput,
@@ -19,8 +21,10 @@ import { cn, autoScrollNearEdge, indexFromY, moveId } from "@/lib/utils";
 import { listedChats, useApp } from "@/lib/store";
 import { replyStoryText } from "@/lib/reply-markup";
 import { ChatAvatar, IconBtn } from "./ui-kit";
+import { isWorkshopChat, workshopTitle } from "@/lib/workshop";
 
 const HOLD_MS = 420;
+const sidebarScroll = { home: 0, workshop: 0 };
 
 export function Sidebar() {
   const open = useApp((s) => s.ui.sidebar);
@@ -30,7 +34,8 @@ export function Sidebar() {
   const currentId = useApp((s) => s.currentId);
   const ui = useApp((s) => s.ui);
   const theme = useApp((s) => s.settings.theme);
-  const { foldersSorted, root, inFolder } = listedChats(folders, chats);
+  const place = ui.workshop ? "workshop" : "home";
+  const { foldersSorted, root, inFolder } = listedChats(folders, chats, place);
   const [draftOrder, setDraftOrder] = useState<string[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -39,6 +44,42 @@ export function Sidebar() {
   const lastY = useRef(0);
   const rafRef = useRef(0);
   draftRef.current = draftOrder;
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = listRef.current;
+    if (!el) return;
+    const key = ui.workshop ? "workshop" : "home";
+    const want = sidebarScroll[key];
+    let remember = false;
+    const place = () => {
+      const room = el.scrollHeight - el.clientHeight;
+      if (want > 0 && room + 1 < want) return false;
+      el.scrollTop = want;
+      return true;
+    };
+    remember = place();
+    const onScroll = () => {
+      if (!remember) return;
+      sidebarScroll[key] = el.scrollTop;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    let frames = 0;
+    let raf = 0;
+    const tick = () => {
+      frames += 1;
+      if (place() || frames > 8) {
+        remember = true;
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    if (!remember) raf = requestAnimationFrame(tick);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      el.removeEventListener("scroll", onScroll);
+    };
+  }, [open, ui.workshop]);
 
   const visualFolders = draftOrder
     ? [...foldersSorted].sort((a, b) => draftOrder.indexOf(a.id) - draftOrder.indexOf(b.id))
@@ -179,8 +220,9 @@ export function Sidebar() {
                   className="shrink-0 text-[15px] font-medium text-primary"
                   onClick={() => {
                     const ids = [
-                      ...folders.map((f) => f.id),
-                      ...chats.filter((c) => !c.isDraft).map((c) => c.id),
+                      ...foldersSorted.map((f) => f.id),
+                      ...foldersSorted.flatMap((f) => inFolder(f.id).map((c) => c.id)),
+                      ...root.map((c) => c.id),
                     ];
                     setUI({ selected: ids });
                   }}
@@ -204,6 +246,21 @@ export function Sidebar() {
                 手动排序
               </button>
             </>
+          ) : ui.workshop ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                className="flex shrink-0 items-center text-[15px]"
+                onClick={() => setUI({ workshop: false, selectMode: false, selected: [], sortMode: false, menuId: null })}
+              >
+                <ChevronLeft className="size-5" />
+                返回
+              </button>
+              <div className="min-w-0 flex-1 text-center font-serif text-[20px] tracking-wide">绘语工坊</div>
+              <IconBtn aria-label="创建文件夹" onClick={() => useApp.getState().addFolder("workshop")}>
+                <FolderPlus className="size-5" />
+              </IconBtn>
+            </div>
           ) : (
             <div className="flex items-start justify-between">
               <div>
@@ -235,23 +292,60 @@ export function Sidebar() {
           ref={listRef}
           className={cn("flex-1 overflow-y-auto px-4 scroll-thin hold-none", ui.selectMode && !ui.sortMode ? "pb-36" : "pb-6")}
         >
-          {!ui.sortMode && (
-            <>
-              <button
-                className="mb-2 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-[15px] font-medium text-on-primary disabled:opacity-40"
-                disabled={ui.selectMode}
-                onClick={() => useApp.getState().newDraft()}
-              >
-                <Plus className="size-4" /> 新建聊天
-              </button>
-              <button
-                className="mb-4 flex h-12 w-full items-center justify-center gap-2 rounded-full border border-line bg-card text-[14px] disabled:opacity-40"
-                disabled={ui.selectMode}
-                onClick={() => useApp.getState().addFolder()}
-              >
-                <FolderPlus className="size-4" /> 创建文件夹
-              </button>
-            </>
+          {!ui.sortMode &&
+            (ui.workshop ? (
+              <>
+                <button
+                  type="button"
+                  className="mb-2 text-[13px] text-primary"
+                  onClick={() => setUI({ workshopAvatars: true })}
+                >
+                  设置头像
+                </button>
+                <button
+                  className="mb-2 flex h-12 w-full items-center justify-center rounded-full bg-primary text-[15px] font-medium text-on-primary"
+                  disabled={ui.selectMode}
+                  onClick={() => setUI({ workshopName: "card" })}
+                >
+                  ✍️新建写卡助手
+                </button>
+                <button
+                  className="mb-4 flex h-12 w-full items-center justify-center rounded-full border border-line bg-card text-[14px]"
+                  disabled={ui.selectMode}
+                  onClick={() => setUI({ workshopName: "assistant" })}
+                >
+                  ✨新建绘语助理
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="mb-2 flex h-12 w-full items-center justify-center gap-2 rounded-full bg-primary text-[15px] font-medium text-on-primary disabled:opacity-40"
+                  disabled={ui.selectMode}
+                  onClick={() => useApp.getState().newDraft()}
+                >
+                  <Plus className="size-4" /> 新建聊天
+                </button>
+                <button
+                  className="mb-4 flex h-12 w-full items-center justify-center gap-2 rounded-full border border-line bg-card text-[14px] disabled:opacity-40"
+                  disabled={ui.selectMode}
+                  onClick={() => useApp.getState().addFolder()}
+                >
+                  <FolderPlus className="size-4" /> 创建文件夹
+                </button>
+              </>
+            ))}
+
+          {!ui.workshop && !ui.sortMode && (
+            <button
+              type="button"
+              className="mb-3 flex w-full items-center gap-3 rounded-[18px] border-2 border-primary px-3 py-3 text-left"
+              onClick={() => setUI({ workshop: true, menuId: null, selectMode: false, selected: [], sortMode: false })}
+            >
+              <span className="min-w-0 flex-1 text-[16px] font-semibold">绘语工坊</span>
+              <Star className="size-4 fill-primary text-primary" />
+              <ChevronRight className="size-4 text-muted" />
+            </button>
           )}
 
           {visualFolders.map((f) => (
@@ -294,7 +388,7 @@ export function Sidebar() {
 
         {ui.selectMode && !ui.sortMode && (
           <div className="absolute inset-x-0 bottom-0 border-t border-line bg-bg px-1 pt-2 pb-[calc(env(safe-area-inset-bottom)+10px)]">
-            {ui.selected.filter((id) => chats.some((c) => c.id === id && !c.isDraft)).length >= 2 && (
+            {ui.selected.filter((id) => chats.some((c) => c.id === id && !c.isDraft)).length >= 2 && !ui.workshop && (
               <button
                 type="button"
                 className="mx-3 mb-2 w-[calc(100%-1.5rem)] rounded-full border border-line bg-card py-2.5 text-[13px] font-medium"
@@ -552,7 +646,7 @@ function ChatRow({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1 text-[15px] font-medium">
             {chat.starred && <Star className="size-3 shrink-0 fill-primary text-primary" />}
-            <span className="min-w-0 truncate">{chat.name || "未命名"}</span>
+            <span className="min-w-0 truncate">{workshopTitle(chat)}</span>
           </div>
           <div className="truncate text-[12px] text-muted">{last || "新的对话"}</div>
         </div>
@@ -599,8 +693,12 @@ function ChatRow({
           <button
             className="block w-full px-4 py-2.5 text-left text-[14px]"
             onClick={() => {
-              useApp.getState().setUI({ menuId: null, sidebar: false });
-              useApp.getState().beginEdit(id);
+              useApp.getState().setUI({ menuId: null });
+              if (isWorkshopChat(chat)) useApp.getState().setUI({ workshopEditId: id });
+              else {
+                useApp.getState().setUI({ sidebar: false });
+                useApp.getState().beginEdit(id);
+              }
             }}
           >
             修改设定
@@ -611,8 +709,8 @@ function ChatRow({
               useApp.getState().setUI({
                 menuId: null,
                 confirm: {
-                  title: "删除角色",
-                  body: `删除「${chat.name}」以及全部聊天记录？`,
+                  title: isWorkshopChat(chat) ? "删除" : "删除角色",
+                  body: `删除「${workshopTitle(chat)}」以及全部聊天记录？`,
                   danger: true,
                   onOk: () => {
                     useApp.getState().setUI({ selected: [id] });
@@ -622,7 +720,7 @@ function ChatRow({
               });
             }}
           >
-            删除角色
+            {isWorkshopChat(chat) ? "删除" : "删除角色"}
           </button>
         </div>
       )}

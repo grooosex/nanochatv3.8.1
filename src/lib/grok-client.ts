@@ -1,5 +1,6 @@
 import { useApp } from "./store";
 import type { GrokModelId } from "./types";
+import { resolveLlmSend } from "./llm-models";
 
 async function readJsonError(res: Response, fallback: string) {
   try {
@@ -56,18 +57,19 @@ async function grokOnceRaw(body: Record<string, unknown>, signal?: AbortSignal) 
   const maxFromOwn = typeof ownParams?.maxTokens === "number" ? ownParams.maxTokens : undefined;
 
   if (via === "api") {
-    const model = modelBody || s.llmModel;
-    const apiKey = keyBody || s.llmKey;
+    const modelKey = modelBody || s.llmModel;
+    const route = resolveLlmSend(s, modelKey, baseBody, keyBody);
+    const apiKey = route.apiKey;
     if (!apiKey) throw new Error("还没连接对话 API");
-    if (!model) throw new Error("还没选择模型");
+    if (!route.model) throw new Error("还没选择模型");
     const res = await fetch("/api/llm", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "chat",
-        baseUrl: baseBody || s.llmBase,
+        baseUrl: route.baseUrl,
         apiKey,
-        model,
+        model: route.model,
         ...rest,
         params: ownParams ?? s.llmParams,
         stream: false,
@@ -140,33 +142,36 @@ async function grokStreamRaw(
   const baseBody = typeof body.baseUrl === "string" ? body.baseUrl : "";
   const keyBody = typeof body.apiKey === "string" ? body.apiKey : "";
   const presetOn = Boolean(s.stActiveId);
+  const modelKey = typeof body.model === "string" ? body.model : s.llmModel;
+  const route = api ? resolveLlmSend(s, modelKey, baseBody, keyBody) : null;
   if (api) {
-    const apiKey = keyBody || s.llmKey;
-    if (!apiKey) throw new Error("还没连接对话 API");
-    if (!s.llmModel && typeof body.model !== "string") throw new Error("还没选择模型");
+    if (!route?.apiKey) throw new Error("还没连接对话 API");
+    if (!route.model) throw new Error("还没选择模型");
   }
-
-  const url = api ? "/api/llm" : "/api/grok";
   const ownParams = body.params && typeof body.params === "object" ? (body.params as Record<string, unknown>) : null;
   const maxFromOwn = typeof ownParams?.maxTokens === "number" ? ownParams.maxTokens : undefined;
+  const rest = { ...body };
+  delete rest.baseUrl;
+  delete rest.apiKey;
+  delete rest.model;
+  delete rest.via;
   const payload = api
     ? {
         action: "chat",
-        baseUrl: baseBody || s.llmBase,
-        apiKey: keyBody || s.llmKey,
-        model: typeof body.model === "string" ? body.model : s.llmModel,
-        ...body,
+        ...rest,
+        baseUrl: route?.baseUrl,
+        apiKey: route?.apiKey,
+        model: route?.model,
         params: ownParams ?? s.llmParams,
         stream: true,
         max_tokens: (body.max_tokens as number | undefined) ?? maxFromOwn ?? s.llmParams.maxTokens,
       }
     : {
-        ...body,
+        ...rest,
         stream: true,
         params: ownParams ?? (presetOn && body.task !== "image" ? s.llmParams : undefined),
       };
-
-  const res = await fetch(url, {
+  const res = await fetch(api ? "/api/llm" : "/api/grok", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),

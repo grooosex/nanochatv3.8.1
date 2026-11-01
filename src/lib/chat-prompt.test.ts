@@ -5,6 +5,7 @@ import { assignCharTags, presenceFromTags, legacyPresentIds } from "./nai-tags.t
 import { settleStuckImages, imageFailText, prettyImageError } from "./image-status.ts";
 import { emptyCharacter, defaultImageParams } from "./constants.ts";
 import type { Chat } from "./types.ts";
+import { readFileSync } from "node:fs";
 
 function stub(partial: Partial<Chat> = {}): Chat {
   return {
@@ -235,6 +236,22 @@ describe("systemFor chat", () => {
     const sys = systemFor("chat", "【要求总览】写细", undefined, img);
     assert.ok(sys.endsWith(img));
     assert.match(sys, /要求总览/);
+  });
+
+  it("workshop stays out of roleplay", () => {
+    const sys = systemFor("workshop", "你是写卡助手");
+    assert.match(sys, /你是写卡助手/);
+    assert.match(sys, /不要角色扮演/);
+    assert.doesNotMatch(sys, /视觉小说/);
+  });
+
+  it("card writer asks for density and linkage, not one sample card", () => {
+    const text = readFileSync(new URL("./workshop.ts", import.meta.url), "utf8");
+    assert.match(text, /禁止写成提纲/);
+    assert.match(text, /怎么咬合/);
+    assert.match(text, /只学这一小段/);
+    assert.match(text, /不要出现「短骨架」/);
+    assert.doesNotMatch(text, /小玉|言叶|优酱|七实/);
   });
 
   it("omits image rules when the switch is off", () => {

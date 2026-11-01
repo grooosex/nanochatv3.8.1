@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   DEFAULT_GROK,
   DEFAULT_STATUS_BAR,
+  isLegacyStatusBar,
   defaultImageParams,
   defaultPureParams,
   emptyCharacter,
@@ -10,6 +11,7 @@ import {
 } from "./constants";
 import { db, defaultSettings, deleteImage, loadAll, putImage, rememberUrl } from "./idb";
 import { cloneChat } from "./archive";
+import { isWorkshopChat } from "./workshop";
 import { syncCharsFromRole } from "./nai";
 import { forgetIfPrompt, syncAppearanceModule } from "./random-prompt";
 import type {
@@ -181,6 +183,11 @@ interface UI {
     shotBackup: UserShot[] | null;
   } | null;
   wechatView: { chatId: string; msgId: string } | null;
+  workshop: boolean;
+  workshopName: "assistant" | "card" | null;
+  workshopEditId: string | null;
+  workshopAvatars: boolean;
+  workshopCardText: string | null;
 }
 
 interface State {
@@ -220,7 +227,9 @@ interface State {
   openChat: (id: string, opts?: { edit?: boolean }) => void;
   beginEdit: (id: string) => void;
   cancelEdit: () => void;
-  addFolder: () => void;
+  addFolder: (place?: "workshop") => void;
+  createWorkshop: (kind: "assistant" | "card", name: string) => void;
+  addCard: (card: CharacterCard) => void;
   toggleFolder: (id: string) => void;
   deleteSelected: () => void;
   starSelected: () => void;
@@ -293,6 +302,11 @@ const ui0 = (): UI => ({
   memoryHint: null,
   editUserMsg: null,
   wechatView: null,
+  workshop: false,
+  workshopName: null,
+  workshopEditId: null,
+  workshopAvatars: false,
+  workshopCardText: null,
 });
 
 function persistChat(c: Chat) {
@@ -362,13 +376,33 @@ export const useApp = create<State>((set, get) => ({
     if (liftDirty || settingsFinal !== nextSettings) {
       void db.kv.put({ key: "settings", value: settingsFinal });
     }
+    let chats = live;
+    let cards = data.cards ?? [];
+    let settingsOut = settingsFinal;
+    if (!settingsFinal.statusBarMigrated) {
+      chats = live.map((c) => {
+        if (!isLegacyStatusBar(c.statusBar)) return c;
+        const next = { ...c, statusBar: DEFAULT_STATUS_BAR };
+        persistChat(next);
+        return next;
+      });
+      cards = cards.map((card) => {
+        if (!isLegacyStatusBar(card.statusBar)) return card;
+        const next = { ...card, statusBar: DEFAULT_STATUS_BAR };
+        void db.cards.put(next);
+        return next;
+      });
+      settingsOut = { ...settingsFinal, statusBarMigrated: true };
+      void db.kv.put({ key: "settings", value: settingsOut });
+    }
     const favs = orderFavorites((data.favorites ?? []).map(migrateFavorite).filter(Boolean) as FavoriteItem[]);
     const tree = tidyFavTree(data.favGroups ?? [], favs);
     set({
       ready: true,
       ...data,
-      settings: settingsFinal,
-      chats: live,
+      settings: settingsOut,
+      chats,
+      cards,
       favorites: tree.favorites,
       favGroups: tree.favGroups,
       pureParams: normalizePureParams((pureRow?.value as ImageParams) ?? defaultPureParams()),
@@ -559,7 +593,7 @@ export const useApp = create<State>((set, get) => ({
     }
   },
 
-  addFolder: () => {
+  addFolder: (place) => {
     const f: Folder = {
       id: uid("fold_"),
       name: "新建文件夹",
@@ -567,10 +601,52 @@ export const useApp = create<State>((set, get) => ({
       collapsed: false,
       order: Date.now(),
       createdAt: Date.now(),
+      ...(place === "workshop" ? { place: "workshop" as const } : {}),
     };
     void db.folders.put(f);
     set((s) => ({ folders: [...s.folders, f] }));
     get().toast("已创建文件夹");
+  },
+
+  createWorkshop: (kind, name) => {
+    const id = uid("chat_");
+    const settings = get().settings;
+    const avatar = kind === "card" ? settings.workshopCardAvatar : settings.workshopAssistAvatar;
+    const draft: Chat = {
+      id,
+      folderId: null,
+      name,
+      remark: "",
+      starred: false,
+      order: Date.now(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      kind,
+      brief: "",
+      grokModelId: settings.grokModelId || DEFAULT_GROK,
+      isMulti: false,
+      multiMode: "together",
+      promptMode: "insert",
+      adultBoost: false,
+      canGen: false,
+      statusBarOn: false,
+      statusBar: "",
+      overview: "",
+      opening: "",
+      extras: [],
+      memory: "",
+      memoryUntil: 0,
+      memoryFoldAt: 0,
+      memorySnaps: [],
+      characters: [{ ...emptyCharacter(1), name }],
+      imageParams: defaultImageParams(),
+      messages: [],
+      scrollTop: 0,
+      ...(avatar ? { customAvatarBlobId: avatar } : {}),
+    };
+    persistChat(draft);
+    set((s) => ({ chats: [...s.chats, draft] }));
+    get().toast(`已创建「${name}」`);
   },
 
   toggleFolder: (id) => {
@@ -732,6 +808,12 @@ export const useApp = create<State>((set, get) => ({
     void db.cards.put(card);
     set((s) => ({ cards: [...s.cards, card], ui: { ...s.ui, saveCardOpen: false } }));
     get().toast(`已保存角色卡「${name}」`);
+  },
+
+  addCard: (card) => {
+    void db.cards.put(card);
+    set((s) => ({ cards: [...s.cards, card], ui: { ...s.ui, workshopCardText: null } }));
+    get().toast(`已保存角色卡「${card.name}」`);
   },
 
   updateCard: (card) => {
@@ -1292,12 +1374,14 @@ export async function saveBlob(blob: Blob) {
   return id;
 }
 
-export function listedChats(folders: Folder[], chats: Chat[]) {
-  const live = chats.filter((c) => !c.isDraft);
-  const foldersSorted = [...folders].sort((a, b) => {
-    if (a.starred !== b.starred) return a.starred ? -1 : 1;
-    return a.order - b.order;
-  });
+export function listedChats(folders: Folder[], chats: Chat[], place: "home" | "workshop" = "home") {
+  const live = chats.filter((c) => !c.isDraft && (place === "workshop" ? isWorkshopChat(c) : !isWorkshopChat(c)));
+  const foldersSorted = [...folders]
+    .filter((f) => (place === "workshop" ? f.place === "workshop" : f.place !== "workshop"))
+    .sort((a, b) => {
+      if (a.starred !== b.starred) return a.starred ? -1 : 1;
+      return a.order - b.order;
+    });
   const root = live
     .filter((c) => !c.folderId)
     .sort((a, b) => {

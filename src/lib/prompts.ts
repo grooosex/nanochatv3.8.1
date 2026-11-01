@@ -435,6 +435,11 @@ export function systemFor(task: string, extra?: string, styleExtra?: string, ima
       : POLISH_SYSTEM;
     return style ? `${core}\n\n${style}\n\n${TASK_CLOSER}` : core;
   }
+  if (task === "workshop") {
+    const core = extra?.trim() || "你是绘语里的助手。直接回答，不要角色扮演。";
+    const closer = "不要角色扮演，不要选项，不要状态栏，不要好感度，不要预设自己的回复格式，不要生图标签。预设只用于文风和少被误杀。";
+    return style ? `${core}\n\n${style}\n\n${closer}` : `${core}\n\n${closer}`;
+  }
   return RP_SYSTEM;
 }
 
@@ -465,8 +470,8 @@ export function sceneTail(chat: Chat): string {
         template ? `模板：\n${template}` : "",
         chat.isMulti
           ? chat.multiMode === "group"
-            ? "每人一块，写在这个人的 <<<CHAR>>> 里面。不要另写名字。旁白不要写。"
-            : "每人一块。分界的下一行只写这个人的名字，不要加冒号，这一行不是状态项。"
+            ? "每人一块，写在这个人的 <<<CHAR>>> 里面，只写这个人自己的。不要另写名字。旁白不要写。"
+            : "几个人就几块，两个人、三个人都一样。每个人自己先独占一行写「状态栏:」，下一行只写这个人的名字，不要加冒号。再写这个人的好感度（若开着）和状态条目。不要把几个人写在同一个「状态栏:」下面。"
           : "",
       ]
         .filter(Boolean)
@@ -493,6 +498,7 @@ export function sceneTail(chat: Chat): string {
         "「[按这个人人设写的一两句，写她此刻对你的真实感受或潜台词]」",
         "上升写 📈+数字，下降写 📉-数字，为零写 0。心里话必须另起一行，用「」框住，行首不要加图标。",
         status ? "这两行写在这个人那一块里、状态条目的上面。不要写在最后，也不要在模板外再写一块。" : "不要写状态栏。每人只在正文最后写这两行。",
+        chat.isMulti && chat.multiMode !== "group" ? "每个人自己的「状态栏:」里都要有这两行，不要只写第一个人。" : "",
         chat.isMulti && chat.multiMode === "group" ? "写在各自的 <<<CHAR>>> 里。旁白不要写好感度。" : "",
       ]
         .filter(Boolean)

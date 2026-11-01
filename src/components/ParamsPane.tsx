@@ -20,9 +20,9 @@ import { replyStoryText } from "@/lib/reply-markup";
 import {
   FOLLOW_IMAGE_AI,
   applyImageAiPick,
-  imageAiLabel,
   imagePickerModels,
 } from "@/lib/image-ai";
+import { llmModelLabel } from "@/lib/llm-models";
 import type { AppearancePreset, Chat, CharacterPrompt, ImageParams, NaiModelId, NoiseSchedule, SamplerId, UcPreset } from "@/lib/types";
 import { cn, randomSeed, uid } from "@/lib/utils";
 import { appendPrompt } from "@/lib/random-prompt";
@@ -165,7 +165,7 @@ export function ParamsPane({ chat, mode = "chat" }: { chat: Chat; mode?: "chat" 
   const look = readLook(useApp((s) => s.settings.look));
   const ownBg = Boolean(chat.bgImageId);
   return (
-    <div className="relative h-full">
+    <div className={mode === "pure" ? "relative" : "relative h-full"}>
       {mode === "chat" ? (
         <SceneBackdrop blobId={ownBg ? chat.bgImageId : look.bgImageId} fade={ownBg ? (chat.bgFade ?? 40) : look.bgFade} paper={look.paper} />
       ) : null}
@@ -751,6 +751,7 @@ function ImageAiPicker() {
   const llmModel = useApp((s) => s.settings.llmModel);
   const starred = useApp((s) => s.settings.llmStarred);
   const available = useApp((s) => s.settings.llmModels);
+  const accounts = useApp((s) => s.settings.llmAccounts) ?? [];
   const connected = useApp((s) => s.settings.llmConnected);
   const imageModelId = useApp((s) => s.settings.imageModelId);
   const rows = imagePickerModels({
@@ -771,8 +772,8 @@ function ImageAiPicker() {
           value={value}
           options={rows.map((r) => ({
             id: r.id,
-            label: r.header ?? imageAiLabel(r.id),
-            short: r.header ?? imageAiLabel(r.id),
+            label: r.header ?? llmModelLabel(r.id, accounts, available),
+            short: r.header ?? llmModelLabel(r.id, accounts, available),
             header: Boolean(r.header),
             danger: r.danger,
           }))}
@@ -787,7 +788,7 @@ function ImageAiPicker() {
       </div>
       {imageModelId ? (
         <p className="mt-1 max-w-[11rem] text-[11px] leading-4 text-muted">
-          对白用顶栏，提示词用 {imageAiLabel(imageModelId)}
+          对白用顶栏，提示词用 {llmModelLabel(imageModelId, accounts, available)}
         </p>
       ) : null}
     </div>

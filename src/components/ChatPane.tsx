@@ -4,6 +4,7 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  Copy,
   Download,
   GitBranch,
   Loader2,
@@ -26,6 +27,7 @@ import { saveBlob, useApp } from "@/lib/store";
 import { downloadBlob, cn } from "@/lib/utils";
 import { foldWindow, genPhaseLabel, stripStatus } from "@/lib/engine";
 import { presentScene, readScene, writeScene, type AffinityBits, type SceneCard, type StatusLine } from "@/lib/scene-bar";
+import { isWorkshopChat, replyLooksLikeCard, workshopTitle } from "@/lib/workshop";
 import { memoryCaughtUp } from "@/lib/chat-memory";
 import { splitDialogue, stripSpeakerPrefix } from "@/lib/rp-text";
 import { fontStack, readLook, sayWeight } from "@/lib/look";
@@ -168,7 +170,7 @@ export function ChatPane({ chat }: { chat: Chat }) {
             key={m.id}
             chat={chat}
             msg={m}
-            showImageTray={chatImage && m.role !== "user"}
+            showImageTray={chatImage && !isWorkshopChat(chat) && m.role !== "user"}
             onUseOption={(t) => {
               useApp.getState().setComposerDraft(chat.id, t);
               requestAnimationFrame(() => inputRef.current?.focus());
@@ -180,7 +182,8 @@ export function ChatPane({ chat }: { chat: Chat }) {
       </div>
 
       <div className="shrink-0 bg-bg px-3 pb-[calc(env(safe-area-inset-bottom)+10px)] pt-1">
-        <WechatChip chatId={chat.id} />
+        {!isWorkshopChat(chat) && <WechatChip chatId={chat.id} />}
+        {!isWorkshopChat(chat) && (
         <div className="mb-1.5 flex h-6 items-center gap-1.5 px-0.5 text-[13px] leading-none">
           <div className="inline-flex h-[22px] items-center gap-1.5 rounded-md border border-line bg-card px-1.5">
             <button
@@ -231,6 +234,7 @@ export function ChatPane({ chat }: { chat: Chat }) {
             成人提示词
           </button>
         </div>
+        )}
         {memGenerating || memOkFlash || memFail ? (
           <div className="flex items-center gap-2 px-[52px] pb-1 text-[12px]">
             <span className={memFail ? "min-w-0 flex-1 text-danger" : memOkFlash ? "min-w-0 flex-1 text-good" : "min-w-0 flex-1 text-faint"}>
@@ -725,10 +729,13 @@ function Bubble({
     <div className="mb-6">
       <button
         className="mb-2 flex items-center gap-2"
-        onClick={() => useApp.getState().beginEdit(chat.id)}
+        onClick={() => {
+          if (isWorkshopChat(chat)) useApp.getState().setUI({ workshopEditId: chat.id });
+          else useApp.getState().beginEdit(chat.id);
+        }}
       >
         <ChatAvatar chat={chat} name={msg.characterName || chat.name} size={36} />
-        <div className="text-[16px] font-semibold">{msg.characterName || chat.name}</div>
+        <div className="text-[16px] font-semibold">{workshopTitle({ kind: chat.kind, name: msg.characterName || chat.name })}</div>
       </button>
       <div className="pl-[44px]">
         {generating ? (
@@ -783,7 +790,26 @@ function Bubble({
             {!generating && (
               <Mini onClick={startAssistEdit} icon={<Pencil className="size-3" />} label="编辑" />
             )}
+            {chat.kind === "card" && !generating && (
+              <Mini
+                onClick={() => {
+                  void navigator.clipboard.writeText(msg.content);
+                  useApp.getState().toast("已复制");
+                }}
+                icon={<Copy className="size-3" />}
+                label="复制"
+              />
+            )}
           </div>
+        )}
+        {chat.kind === "card" && !edit && !generating && replyLooksLikeCard(msg.content) && (
+          <button
+            type="button"
+            className="mt-2 inline-flex h-7 items-center rounded-full border border-line bg-card px-3 text-[12px]"
+            onClick={() => useApp.getState().setUI({ workshopCardText: msg.content })}
+          >
+            保存为角色卡
+          </button>
         )}
         {cards.length > 0 && !edit && (
           <div className="mt-3 space-y-2">

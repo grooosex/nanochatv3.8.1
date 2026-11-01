@@ -3,7 +3,7 @@ import { Check, ChevronDown, Download, FileUp, Lock, Pencil, RotateCcw, Settings
 import { DEFAULT_NAI_BASE, shortModelLabel } from "@/lib/constants";
 import { exportArchive, importArchive } from "@/lib/archive";
 import { fetchLlmModels } from "@/lib/grok-client";
-import { applyLlmPick, pruneStarred, snapshotLlmAccount } from "@/lib/llm-models";
+import { applyLlmPick, catalogFromLinks, isMultiLlm, llmModelLabel, llmModelName, parseLlmModelKey, pruneStarred, snapshotLlmAccount } from "@/lib/llm-models";
 import { llmIdentity } from "@/lib/image-ai";
 import { useApp } from "@/lib/store";
 import { cn, uid, uniqueNumberedName } from "@/lib/utils";
@@ -235,6 +235,7 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
         chatSource: "api",
         llmAccounts: snapshotLlmAccount(live.llmAccounts ?? [], u, k, starred, nextModel),
         llmIdentity: nextIdentity,
+        llmActiveIds: [],
       });
       if (prevIdentity && prevIdentity !== nextIdentity) useApp.getState().clearImageAi();
       useApp.getState().toast(
@@ -253,9 +254,93 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
       llmConnected: false,
       llmKey: "",
       chatSource: "grok",
+      llmActiveIds: [],
     });
     setKey("");
     useApp.getState().toast("已断开 API");
+  };
+
+  const connectMany = async (picked: LlmAccount[]) => {
+    if (!picked.length) {
+      useApp.getState().toast("请先选择");
+      return;
+    }
+    if (picked.length === 1) {
+      const a = picked[0];
+      setUrl(a.base);
+      setKey(a.key);
+      await connect({
+        url: a.base,
+        key: a.key,
+        starred: a.starred,
+        model: a.model,
+        toast: `已应用密钥（${a.name}）`,
+      });
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    const results = await Promise.all(
+      picked.map(async (account) => {
+        try {
+          const models = await fetchLlmModels(account.base, account.key);
+          return { account, models, error: "" };
+        } catch (e) {
+          return { account, models: [] as string[], error: e instanceof Error ? e.message : "连接失败" };
+        }
+      }),
+    );
+    const ok = results.filter((row) => !row.error);
+    const bad = results.filter((row) => row.error);
+    if (!ok.length) {
+      setErr(bad.map((row) => `${row.account.name}：${row.error}`).join("\n"));
+      setBusy(false);
+      return;
+    }
+    if (ok.length === 1) {
+      setBusy(false);
+      const a = ok[0].account;
+      const fail = bad.map((row) => row.account.name).join("、");
+      setUrl(a.base);
+      setKey(a.key);
+      await connect({
+        url: a.base,
+        key: a.key,
+        starred: a.starred,
+        model: a.model,
+        toast: fail ? `${a.name}已连接，${fail}没连上` : `已应用密钥（${a.name}）`,
+      });
+      return;
+    }
+    const live = useApp.getState().settings;
+    let accounts = live.llmAccounts ?? [];
+    for (const row of ok) {
+      const stars = (row.account.starred ?? []).filter((id) => row.models.includes(id));
+      const model = row.account.model && row.models.includes(row.account.model) ? row.account.model : row.models[0] || "";
+      accounts = accounts.map((a) => (a.id === row.account.id ? { ...a, starred: stars, model } : a));
+    }
+    const links = ok.map((row) => ({
+      account: accounts.find((a) => a.id === row.account.id) ?? row.account,
+      models: row.models,
+    }));
+    const packed = catalogFromLinks(links, live.llmModel);
+    const imageHit =
+      live.imageModelId && packed.llmModels.filter((id) => id === live.imageModelId || llmModelName(id) === live.imageModelId);
+    useApp.getState().setSettings({
+      llmConnected: true,
+      chatSource: "api",
+      llmActiveIds: ok.map((row) => row.account.id),
+      llmModels: packed.llmModels,
+      llmStarred: packed.llmStarred,
+      llmModel: packed.llmModel,
+      llmAccounts: accounts,
+      llmBase: "",
+      llmKey: "",
+      ...(imageHit && imageHit.length === 1 ? { imageModelId: imageHit[0] } : {}),
+    });
+    const fail = bad.map((row) => row.account.name).join("、");
+    useApp.getState().toast(fail ? `已连接 ${ok.length} 个密钥，${fail}没连上` : `已连接 ${ok.length} 个密钥`);
+    setBusy(false);
   };
 
   const saveAccount = () => {
@@ -319,7 +404,9 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
           <p className="mt-0.5 truncate text-[12px] text-muted">
             {settings.llmConnected
               ? settings.llmModel
-                ? shortModelLabel(settings.llmModel)
+                ? isMultiLlm(settings.llmActiveIds)
+                ? "(已连接多个密钥)"
+                : shortModelLabel(settings.llmModel)
                 : "已连接"
               : "未连接"}
           </p>
@@ -334,6 +421,7 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
           type="button"
           className="text-[12px] font-normal text-muted"
           onClick={() => {
+            if (isMultiLlm(settings.llmActiveIds)) return;
             if (!url.trim() || !key.trim()) {
               useApp.getState().toast("请填写网址和密钥");
               return;
@@ -346,14 +434,16 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
         </button>
       </div>
       <TextInput
-        value={url}
+        value={isMultiLlm(settings.llmActiveIds) ? "(已连接多个密钥)" : url}
         placeholder="https://api.siliconflow.cn/v1"
+        readOnly={isMultiLlm(settings.llmActiveIds)}
         onChange={(e) => setUrl(e.target.value)}
       />
       <p className="mb-3 mt-1 text-[11px] text-muted">OpenAI 兼容。末尾 /v1 即可，不必写到 chat/completions。</p>
       <AccountPicker
         accounts={settings.llmAccounts ?? []}
-        keyValue={key}
+        keyValue={isMultiLlm(settings.llmActiveIds) ? "" : key}
+        keyLocked={isMultiLlm(settings.llmActiveIds)}
         onKeyChange={setKey}
         busy={busy}
         exit={
@@ -380,17 +470,60 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
             toast: `已应用密钥（${a.name}）`,
           });
         }}
-        onDelete={(id) =>
-          useApp.getState().setSettings({
-            llmAccounts: (settings.llmAccounts ?? []).filter((a) => a.id !== id),
-          })
-        }
+        onConfirmMany={(ids) => {
+          const rows = (settings.llmAccounts ?? []).filter((a) => ids.includes(a.id));
+          void connectMany(rows);
+        }}
+        onDelete={(id) => {
+          const s = useApp.getState().settings;
+          const accounts = (s.llmAccounts ?? []).filter((a) => a.id !== id);
+          const active = (s.llmActiveIds ?? []).filter((x) => x !== id);
+          if ((s.llmActiveIds?.length ?? 0) > 1 && active.length > 1) {
+            const llmModels = s.llmModels.filter((key) => parseLlmModelKey(key)?.accountId !== id);
+            const llmStarred = s.llmStarred.filter((key) => parseLlmModelKey(key)?.accountId !== id);
+            const llmModel = llmModels.includes(s.llmModel) ? s.llmModel : llmStarred[0] || llmModels[0] || "";
+            useApp.getState().setSettings({ llmAccounts: accounts, llmActiveIds: active, llmModels, llmStarred, llmModel });
+            return;
+          }
+          if ((s.llmActiveIds?.length ?? 0) > 1) {
+            const left = accounts.find((a) => a.id === active[0]);
+            const llmModels = s.llmModels.flatMap((key) => {
+              const row = parseLlmModelKey(key);
+              return row && left && row.accountId === left.id ? [row.model] : [];
+            });
+            const llmStarred = (left?.starred ?? []).filter((name) => llmModels.includes(name));
+            useApp.getState().setSettings({
+              llmAccounts: accounts,
+              llmActiveIds: [],
+              llmBase: left?.base ?? "",
+              llmKey: left?.key ?? "",
+              llmModels,
+              llmStarred,
+              llmModel: llmModels.includes(llmModelName(s.llmModel)) ? llmModelName(s.llmModel) : llmModels[0] || "",
+            });
+            if (left) {
+              setUrl(left.base);
+              setKey(left.key);
+            }
+            return;
+          }
+          useApp.getState().setSettings({ llmAccounts: accounts });
+        }}
       />
       {err && <p className="mt-2 text-[12px] text-danger">{err}</p>}
       <PrimaryBtn
         className={cn("mt-3", settings.llmConnected && "bg-good hover:bg-good")}
         busy={busy}
-        onClick={() => void connect()}
+        onClick={() => {
+          if (isMultiLlm(settings.llmActiveIds)) {
+            const rows = (settings.llmActiveIds ?? [])
+              .map((id) => (settings.llmAccounts ?? []).find((a) => a.id === id))
+              .filter((a): a is LlmAccount => Boolean(a));
+            void connectMany(rows);
+            return;
+          }
+          void connect();
+        }}
       >
         {settings.llmConnected ? "已连接 · 重新拉取" : "连接"}
       </PrimaryBtn>
@@ -409,19 +542,21 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
           const on = settings.llmStarred.includes(id);
           const next = on ? settings.llmStarred.filter((x) => x !== id) : [...settings.llmStarred, id];
           const llmStarred = pruneStarred(next, settings.llmModels, settings.llmModel);
-          useApp.getState().setSettings({
-            llmStarred,
-            llmAccounts: snapshotLlmAccount(
-              settings.llmAccounts ?? [],
-              settings.llmBase,
-              settings.llmKey,
-              llmStarred,
-              settings.llmModel,
-            ),
-          });
+          const parsed = parseLlmModelKey(id);
+          const llmAccounts = parsed
+            ? (settings.llmAccounts ?? []).map((a) => {
+                if (a.id !== parsed.accountId) return a;
+                const stars = new Set(a.starred ?? []);
+                if (on) stars.delete(parsed.model);
+                else stars.add(parsed.model);
+                return { ...a, starred: [...stars] };
+              })
+            : snapshotLlmAccount(settings.llmAccounts ?? [], settings.llmBase, settings.llmKey, llmStarred, settings.llmModel);
+          useApp.getState().setSettings({ llmStarred, llmAccounts });
         }}
+        labelFor={(id) => llmModelLabel(id, settings.llmAccounts ?? [], settings.llmModels)}
       />
-      {settings.llmConnected && settings.llmModels.length === 0 && (
+      {settings.llmConnected && settings.llmModels.length === 0 && !isMultiLlm(settings.llmActiveIds) && (
         <div className="mt-3">
           <div className="mb-1 text-[13px]">手填模型名</div>
           <div className="flex gap-2">
@@ -445,7 +580,7 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
         </div>
       )}
       <p className="mt-2 text-[12px] text-muted">
-        当前：{settings.llmModel ? shortModelLabel(settings.llmModel) : "未选"} · 常用{" "}
+        当前：{settings.llmModel ? llmModelLabel(settings.llmModel, settings.llmAccounts ?? [], settings.llmModels) : "未选"} · 常用{" "}
         {pruneStarred(settings.llmStarred, settings.llmModels, settings.llmModel).length}
       </p>
         </>
@@ -1223,77 +1358,49 @@ function PresetSheet({ onClose }: { onClose: () => void }) {
 function AccountPicker({
   accounts,
   keyValue,
+  keyLocked,
   onKeyChange,
   busy,
   exit,
   onPick,
+  onConfirmMany,
   onDelete,
 }: {
   accounts: LlmAccount[];
   keyValue: string;
+  keyLocked?: boolean;
   onKeyChange: (v: string) => void;
   busy?: boolean;
   exit?: ReactNode;
   onPick: (a: LlmAccount) => void;
+  onConfirmMany: (ids: string[]) => void;
   onDelete: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [chosen, setChosen] = useState<string[]>([]);
   const box = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const hold = useRef<number | null>(null);
+  const skipClick = useRef(false);
 
-  const place = () => {
-    const el = box.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const width = Math.min(r.width, window.innerWidth - 16);
-    const left = Math.min(Math.max(8, r.left), window.innerWidth - width - 8);
-    const top = r.bottom + 4;
-    const maxH = Math.min(260, Math.max(120, window.innerHeight - top - 12));
-    setPos({ top, left, width, maxH });
+  const closePick = () => {
+    setPicking(false);
+    setChosen([]);
   };
 
-  const openMenu = () => {
-    place();
-    setOpen(true);
+  const arm = (id: string) => {
+    if (hold.current) window.clearTimeout(hold.current);
+    hold.current = window.setTimeout(() => {
+      skipClick.current = true;
+      setPicking(true);
+      setChosen((cur) => (cur.includes(id) ? cur : [...cur, id]));
+    }, 450);
   };
-
-  useEffect(() => {
-    if (!open) return;
-    place();
-    let start: { x: number; y: number } | null = null;
-    let downOutside = false;
-    let moved = false;
-    const inChrome = (t: EventTarget | null) => {
-      const n = t as Node | null;
-      return Boolean(n && (box.current?.contains(n) || menu.current?.contains(n)));
-    };
-    const onDown = (e: PointerEvent) => {
-      start = { x: e.clientX, y: e.clientY };
-      downOutside = !inChrome(e.target);
-      moved = false;
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!start) return;
-      if (Math.abs(e.clientX - start.x) + Math.abs(e.clientY - start.y) > 10) moved = true;
-    };
-    const onUp = (e: PointerEvent) => {
-      if (downOutside && !moved && !inChrome(e.target)) setOpen(false);
-      start = null;
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("pointermove", onMove, true);
-    window.addEventListener("pointerup", onUp, true);
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("pointermove", onMove, true);
-      window.removeEventListener("pointerup", onUp, true);
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-  }, [open]);
+  const disarm = () => {
+    if (hold.current) window.clearTimeout(hold.current);
+    hold.current = null;
+  };
 
   return (
     <div ref={box}>
@@ -1301,44 +1408,121 @@ function AccountPicker({
         <span>API 密钥</span>
         <span className="flex shrink-0 items-center gap-3 text-[12px] font-normal">
           {exit}
-          <button type="button" className="text-muted" onClick={() => (open ? setOpen(false) : openMenu())}>
+          <button
+            type="button"
+            className="text-muted"
+            onClick={() => {
+              if (open) {
+                setOpen(false);
+                closePick();
+              } else setOpen(true);
+            }}
+          >
             账号列表
           </button>
         </span>
       </div>
-      <TextInput type="password" value={keyValue} placeholder="" onChange={(e) => onKeyChange(e.target.value)} />
+      <TextInput
+        type={keyLocked ? "text" : "password"}
+        value={keyLocked ? "(已连接多个密钥)" : keyValue}
+        placeholder=""
+        readOnly={keyLocked}
+        onChange={(e) => onKeyChange(e.target.value)}
+      />
       {open && (
         <div
           ref={menu}
-          className="mt-1 max-h-60 overflow-auto overscroll-contain rounded-[16px] border border-line bg-card shadow-[0_16px_40px_rgb(44_40_36/0.16)] scroll-hide"
+          className="mt-1 flex max-h-60 flex-col overflow-hidden rounded-[16px] border border-line bg-card shadow-[0_16px_40px_rgb(44_40_36/0.16)]"
         >
-          {accounts.length === 0 ? (
-                <p className="px-4 py-6 text-center text-[13px] text-muted">还没有保存的账号</p>
-              ) : (
-                accounts.map((a) => (
+          <div className="min-h-0 flex-1 overflow-auto overscroll-contain scroll-hide">
+            {accounts.length === 0 ? (
+              <p className="px-4 py-6 text-center text-[13px] text-muted">还没有保存的账号</p>
+            ) : (
+              accounts.map((a) => {
+                const on = chosen.includes(a.id);
+                return (
                   <div key={a.id} className="flex items-center gap-1 border-b border-line/70 last:border-0">
                     <button
                       type="button"
                       className="min-w-0 flex-1 truncate px-3 py-3 text-left text-[13px]"
-                      disabled={busy}
+                      disabled={busy && !picking}
+                      onContextMenu={(e) => e.preventDefault()}
+                      onPointerDown={() => {
+                        if (picking) return;
+                        arm(a.id);
+                      }}
+                      onPointerUp={disarm}
+                      onPointerCancel={disarm}
+                      onPointerLeave={disarm}
                       onClick={() => {
+                        if (skipClick.current) {
+                          skipClick.current = false;
+                          return;
+                        }
+                        if (picking) {
+                          setChosen((cur) => (cur.includes(a.id) ? cur.filter((id) => id !== a.id) : [...cur, a.id]));
+                          return;
+                        }
                         onPick(a);
                         setOpen(false);
                       }}
                     >
                       {a.name}
                     </button>
-                    <button
-                      type="button"
-                      className="grid size-10 shrink-0 place-items-center text-danger"
-                      aria-label={`删除${a.name}`}
-                      onClick={() => onDelete(a.id)}
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
+                    {picking ? (
+                      <button
+                        type="button"
+                        className="grid size-10 shrink-0 place-items-center"
+                        aria-label={on ? `取消选择${a.name}` : `选择${a.name}`}
+                        onClick={() => setChosen((cur) => (cur.includes(a.id) ? cur.filter((id) => id !== a.id) : [...cur, a.id]))}
+                      >
+                        <span
+                          className={cn(
+                            "grid size-[22px] place-items-center rounded-full border",
+                            on ? "border-primary bg-primary text-on-primary" : "border-line-strong bg-card",
+                          )}
+                        >
+                          {on ? <Check className="size-3.5" strokeWidth={3} /> : null}
+                        </span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="grid size-10 shrink-0 place-items-center text-danger"
+                        aria-label={`删除${a.name}`}
+                        onClick={() => onDelete(a.id)}
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
                   </div>
-                ))
-              )}
+                );
+              })
+            )}
+          </div>
+          {picking ? (
+            <div className="flex gap-2 border-t border-line p-2">
+              <button
+                type="button"
+                className="h-10 flex-1 rounded-full border border-line bg-card text-[13px]"
+                onClick={closePick}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="h-10 flex-1 rounded-full bg-primary text-[13px] text-on-primary"
+                onClick={() => {
+                  const ids = chosen;
+                  closePick();
+                  setOpen(false);
+                  onConfirmMany(ids);
+                }}
+              >
+                确定
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
     </div>
@@ -1352,6 +1536,7 @@ function ModelPicker({
   connected,
   onPick,
   onStar,
+  labelFor,
 }: {
   models: string[];
   current: string;
@@ -1359,6 +1544,7 @@ function ModelPicker({
   connected: boolean;
   onPick: (id: string) => void;
   onStar: (id: string) => void;
+  labelFor?: (id: string) => string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -1481,7 +1667,7 @@ function ModelPicker({
                           setOpen(false);
                         }}
                       >
-                        {id}
+                        {labelFor ? labelFor(id) : id}
                       </button>
                       <button
                         type="button"

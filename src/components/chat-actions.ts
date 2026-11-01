@@ -24,6 +24,7 @@ import { COOLDOWN_MS } from "@/lib/constants";
 import { useApp } from "@/lib/store";
 import { detachWechat } from "@/lib/wechat";
 import { shotAndResidual, previousRoundImagePrompt, latestUserBefore, standingDirectives, formatUserForChat, OPENING_USER, messageShots, stampShots } from "@/lib/user-markup";
+import { isWorkshopChat, workshopExtra } from "@/lib/workshop";
 import { presetStyle } from "@/lib/st-preset";
 import { affinityUpdates } from "@/lib/scene-bar";
 import { chatImageSystem, sceneTail } from "@/lib/prompts";
@@ -238,9 +239,54 @@ function ensureWritingImage(id: string, placeholder: ChatMessage) {
   }));
 }
 
-async function runReply(id: string, _userText: string | null, opening: boolean, regen = false) {
+async function runWorkshopReply(id: string, userText: string | null, regen: boolean) {
   const c0 = chat(id);
   if (!c0) return;
+  const ctrl = new AbortController();
+  aborts.set(id, ctrl);
+  busy.add(id);
+  const placeholder = makeAssistantPlaceholder(c0);
+  patch(id, (c) => ({ ...c, messages: [...c.messages, placeholder] }));
+  const live = chat(id)!;
+  const hist = historyMessages(live).filter((m) => m.content);
+  const msgs = await decorateVision(live, hist);
+  const asked = userText ?? [...hist].reverse().find((m) => m.role === "user")?.content ?? "";
+  const style = presetStyle(useApp.getState().settings, "workshop", c0);
+  try {
+    const raw = await grokStream(
+      {
+        task: "workshop",
+        grokModelId: useApp.getState().settings.grokModelId,
+        extraSystem: workshopExtra(c0, asked),
+        messages: msgs,
+        ...style,
+      },
+      (text) => applyStream(id, placeholder, text, c0),
+      ctrl.signal,
+    );
+    if (raw) applyStream(id, placeholder, raw, c0);
+  } catch (e) {
+    if ((e as Error).name === "AbortError") return;
+    patch(id, (c) => ({
+      ...c,
+      messages: c.messages.map((m) =>
+        m.id === placeholder.id ? { ...m, content: m.content || `（回复失败）${e instanceof Error ? e.message : ""}` } : m,
+      ),
+    }));
+  } finally {
+    busy.delete(id);
+    if (aborts.get(id) === ctrl) aborts.delete(id);
+    void regen;
+  }
+}
+
+async function runReply(id: string, userText: string | null, opening: boolean, regen = false) {
+  const c0 = chat(id);
+  if (!c0) return;
+  if (isWorkshopChat(c0)) {
+    await runWorkshopReply(id, userText, regen);
+    return;
+  }
   const grokModelId = useApp.getState().settings.grokModelId;
   const wantImage = imageOn();
   const imageInChat = wantImage && !resolveImageWrite(useApp.getState().settings.imageModelId).split;
@@ -582,7 +628,7 @@ async function maybeMemory(id: string) {
 
 async function runMemory(id: string) {
   const c = chat(id);
-  if (!c) return;
+  if (!c || isWorkshopChat(c)) return;
   const { W, I } = foldWindow();
   if (memoryCaughtUp(c.messages.length, c.memoryUntil || 0, W, I)) return;
   const slice = nextFoldSlice(c);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { sceneTail } from "./prompts.ts";
+import { DEFAULT_STATUS_BAR, isLegacyStatusBar } from "./constants.ts";
 import { affinityUpdates, formatAffinity, presentScene, readScene, writeScene } from "./scene-bar.ts";
 import type { Chat } from "./types.ts";
 
@@ -81,5 +82,58 @@ describe("presentScene", () => {
     assert.doesNotMatch(out, /💬/);
     assert.ok(out.indexOf("💞") < out.indexOf("头发"));
     assert.equal(formatAffinity(scene.cards[0].affinity!).includes("➕"), false);
+  });
+
+  it("splits every person out of one status block", () => {
+    const raw = [
+      "正文",
+      "状态栏:",
+      "七实",
+      "💞好感度:82[📉-3Ⅰ吃醋]",
+      "「不让。」",
+      "🧣头发:黑色",
+      "小春",
+      "💞好感度:10[📈+1Ⅰ别扭]",
+      "「才没有。」",
+      "🧣头发:粉色",
+      "状态栏:",
+      "花子",
+      "💞好感度:4[0Ⅰ陌生]",
+      "「嗯。」",
+      "🧣头发:短",
+    ].join("\n");
+    const view = presentScene(raw, { status: true, affection: true });
+    assert.deepEqual(
+      view.cards.map((c) => c.name),
+      ["七实", "小春", "花子"],
+    );
+    assert.deepEqual(
+      view.cards.map((c) => c.affinity?.value),
+      [82, 10, 4],
+    );
+    assert.deepEqual(
+      view.cards.map((c) => c.lines[0].value),
+      ["黑色", "粉色", "短"],
+    );
+  });
+
+  it("splits when the next person only repeats the rows", () => {
+    const raw = "正文\n状态栏:\n七实\n💞好感度:82[0Ⅰ喜欢]\n「不让。」\n🧣头发:黑色\n🧣头发:粉色";
+    const view = presentScene(raw, { status: true, affection: true });
+    assert.equal(view.cards.length, 2);
+    assert.equal(view.cards[0].name, "七实");
+    assert.equal(view.cards[0].affinity?.value, 82);
+    assert.equal(view.cards[1].name, "");
+    assert.equal(view.cards[1].lines[0].value, "粉色");
+    assert.equal(view.cards[1].affinity, null);
+  });
+});
+
+describe("legacy status bar", () => {
+  it("matches the old skeleton once, not a hand-added line", () => {
+    assert.equal(isLegacyStatusBar("状态栏:\n👤{name}\n🔮身体改造:无"), true);
+    assert.equal(isLegacyStatusBar(DEFAULT_STATUS_BAR), false);
+    assert.equal(isLegacyStatusBar(`${DEFAULT_STATUS_BAR}\n身体改造:有`), false);
+    assert.equal(isLegacyStatusBar(""), false);
   });
 });

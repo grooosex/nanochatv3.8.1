@@ -1,5 +1,5 @@
 import { GROK_MODELS, shortModelLabel } from "./constants.ts";
-import { chatPickerModels } from "./llm-models.ts";
+import { chatPickerModels, llmModelName } from "./llm-models.ts";
 import type { ChatSource, GrokModelId } from "./types.ts";
 
 export const FOLLOW_IMAGE_AI = "__follow__";
@@ -28,7 +28,7 @@ export function imageAiLabel(id: string) {
   if (!id || id === FOLLOW_IMAGE_AI) return "与聊天一致";
   const g = GROK_MODELS.find((m) => m.id === id);
   if (g) return g.short;
-  return shortModelLabel(id);
+  return shortModelLabel(llmModelName(id));
 }
 
 function grokList() {

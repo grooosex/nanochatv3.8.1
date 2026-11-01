@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { applyLlmPick, chatPickerModels, pruneStarred, snapshotLlmAccount } from "./llm-models.ts";
+import { applyLlmPick, catalogFromLinks, chatPickerModels, llmModelKey, llmModelLabel, pruneStarred, resolveLlmSend, snapshotLlmAccount } from "./llm-models.ts";
 
 describe("chatPickerModels", () => {
   it("keeps current even if it left the catalog, and only listed stars", () => {
@@ -62,5 +62,45 @@ describe("snapshotLlmAccount", () => {
     const next = snapshotLlmAccount(accounts, "https://a", "1", ["z"], "z");
     assert.deepEqual(next[0].starred, ["z"]);
     assert.equal(next[1].model, "y");
+  });
+});
+
+describe("multi llm", () => {
+  const a = { id: "a", name: "甲", base: "https://a/v1", key: "ka", starred: ["same"], model: "same" };
+  const b = { id: "b", name: "乙", base: "https://b/v1", key: "kb", starred: ["only-b"], model: "only-b" };
+
+  it("keeps each model on its own account", () => {
+    const packed = catalogFromLinks([
+      { account: a, models: ["same", "only-a"] },
+      { account: b, models: ["same", "only-b"] },
+    ]);
+    assert.equal(packed.llmModels.length, 4);
+    assert.ok(packed.llmStarred.includes(llmModelKey("a", "same")));
+    assert.ok(packed.llmStarred.includes(llmModelKey("b", "only-b")));
+    assert.equal(llmModelLabel(llmModelKey("a", "same"), [a, b], packed.llmModels), "same · 甲");
+    assert.equal(llmModelLabel(llmModelKey("a", "only-a"), [a, b], packed.llmModels), "only-a");
+    const sent = resolveLlmSend(
+      { llmBase: "", llmKey: "", llmAccounts: [a, b], llmModels: packed.llmModels },
+      llmModelKey("b", "same"),
+    );
+    assert.equal(sent.baseUrl, "https://b/v1");
+    assert.equal(sent.apiKey, "kb");
+    assert.equal(sent.model, "same");
+  });
+
+  it("does not write another account's star when picking", () => {
+    const key = llmModelKey("b", "only-b");
+    const next = applyLlmPick(
+      {
+        llmModels: [llmModelKey("a", "same"), key],
+        llmStarred: [key],
+        llmAccounts: [a, b],
+        llmBase: "",
+        llmKey: "",
+      },
+      key,
+    );
+    assert.equal(next.llmAccounts[1].model, "only-b");
+    assert.deepEqual(next.llmAccounts[0].starred, ["same"]);
   });
 });

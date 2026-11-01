@@ -134,6 +134,15 @@ export const DEFAULT_STATUS_BAR = `🧣头发:
 💪🏻体力:精神充沛
 🌱健康状态:正常`;
 
+/** 旧骨架：有「状态栏:」标题、👤 或 🔮。不是看见「身体改造」四个字。 */
+export function isLegacyStatusBar(text: string | undefined | null) {
+  if (!text?.trim()) return false;
+  return text.split("\n").some((line) => {
+    const t = line.trim();
+    return /^状态栏\s*[:：]?\s*$/.test(t) || /^👤/.test(t) || /^🔮/.test(t);
+  });
+}
+
 export function joinPromptParts(...parts: string[]) {
   return parts.map((s) => s.trim()).filter(Boolean).join(", ");
 }

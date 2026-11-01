@@ -103,6 +103,41 @@ function blockToCard(raw: string, fallback: string): SceneCard {
   return { name: name || fallback, lines: fields, affinity: parseAffinity(love.join("\n")) };
 }
 
+function cardsFromStatus(raw: string, fallback: string): SceneCard[] {
+  const chunks: string[][] = [];
+  let chunk: string[] = [];
+  let seenField = false;
+  let seenLove = false;
+  let started = false;
+  const titles = new Set<string>();
+  const flush = () => {
+    if (chunk.some((line) => line.trim())) chunks.push(chunk);
+    chunk = [];
+    seenField = false;
+    seenLove = false;
+    started = false;
+    titles.clear();
+  };
+  for (const line of raw.split("\n")) {
+    if (!line.trim() || STATUS_LINE.test(line)) continue;
+    const love = isLove(line);
+    const field = splitField(line);
+    const bare = !love && !field ? bareName(line) : null;
+    const repeat = Boolean(field && titles.has(field.title));
+    const another = started && ((Boolean(bare) && (seenField || seenLove)) || (love && seenLove) || repeat);
+    if (another) flush();
+    chunk.push(line);
+    started = true;
+    if (love) seenLove = true;
+    if (field && !/^👤/.test(field.title)) {
+      seenField = true;
+      titles.add(field.title);
+    }
+  }
+  flush();
+  return chunks.map((lines, i) => blockToCard(lines.join("\n"), i === 0 ? fallback : ""));
+}
+
 /** Pull status blocks and affinity lines out of a reply. Stored text is unchanged. */
 export function readScene(text: string, fallbackName = ""): { body: string; cards: SceneCard[] } {
   const lines = text.split("\n");
@@ -114,7 +149,7 @@ export function readScene(text: string, fallbackName = ""): { body: string; card
     const raw = status.join("\n").trim();
     status = null;
     if (!raw) return;
-    cards.push(blockToCard(raw, fallbackName));
+    cards.push(...cardsFromStatus(raw, fallbackName));
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];

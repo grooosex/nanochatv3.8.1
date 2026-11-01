@@ -3,6 +3,7 @@ import { Menu, SlidersHorizontal } from "lucide-react";
 import { emptyCharacter } from "@/lib/constants";
 import { loadTags } from "@/lib/tags";
 import { listedChats, useApp } from "@/lib/store";
+import { isWorkshopChat } from "@/lib/workshop";
 import { FIELD_LABELS } from "@/lib/prompts";
 import { DEFAULT_STATUS_BAR, defaultImageParams } from "@/lib/constants";
 import type { Chat, MultiMode } from "@/lib/types";
@@ -17,6 +18,7 @@ import { ParamsPane } from "./ParamsPane";
 import { PurePane } from "./PurePane";
 import { RoleEditor } from "./RoleEditor";
 import { RenameModal, Sidebar } from "./Sidebar";
+import { WorkshopHost } from "./WorkshopHost";
 import { ConfirmHost, GhostBtn, IconBtn, Modal, PrimaryBtn, TextArea, TextInput, ToastHost } from "./ui-kit";
 
 export function App() {
@@ -92,8 +94,9 @@ function Shell() {
 
       <main className="relative min-h-0 flex-1 overflow-hidden">
         <div className="h-full">{body}</div>
-        {tab === "chat" && chat && !chat.isDraft ? <WechatDock chat={chat} /> : null}
+        {tab === "chat" && chat && !chat.isDraft && !isWorkshopChat(chat) ? <WechatDock chat={chat} /> : null}
         <Sidebar />
+        <WorkshopHost />
         <ConnectionPanel />
         <CardEditSheet />
         <AppearEditSheet />
@@ -241,8 +244,14 @@ function MoveModal() {
   const open = useApp((s) => s.ui.moveOpen);
   const folders = useApp((s) => s.folders);
   const chats = useApp((s) => s.chats);
+  const selected = useApp((s) => s.ui.selected);
   if (!open) return null;
-  const { foldersSorted } = listedChats(folders, chats);
+  const workshop = selected.some((id) => {
+    const chat = chats.find((c) => c.id === id);
+    if (chat) return isWorkshopChat(chat);
+    return folders.find((f) => f.id === id)?.place === "workshop";
+  });
+  const { foldersSorted } = listedChats(folders, chats, workshop ? "workshop" : "home");
   return (
     <Modal open onClose={() => useApp.getState().setUI({ moveOpen: false })} title="移动到">
       <button
