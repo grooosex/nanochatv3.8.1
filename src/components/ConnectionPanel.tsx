@@ -379,14 +379,16 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
           useApp.getState().setSettings({ chatSource: "grok" });
         }}
         className={cn(
-          "mb-3 w-full rounded-[18px] border p-4 text-left",
+          "mb-3 flex w-full items-center rounded-[18px] border p-4 text-left",
           settings.chatSource === "grok" ? "border-primary bg-primary-soft" : "border-line bg-card",
         )}
       >
-        <div className="mb-1 font-medium">Grok</div>
-        <p className="text-[12px] leading-relaxed text-muted">
-          已使用当前 Grok 会员账号，无需再登录。选中后聊天、润色、写提示词都走 Grok。顶栏切换 4.7 / 4.6 / 4.5 均衡、专家、快速。
-        </p>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">Grok</div>
+          <p className="mt-0.5 truncate text-[10px] leading-4 text-muted">
+            会员账号已登录。聊天、润色、写提示词都走 Grok。
+          </p>
+        </div>
       </button>
       <button
         type="button"
@@ -583,6 +585,7 @@ function ChatAiSheet({ onClose }: { onClose: () => void }) {
         当前：{settings.llmModel ? llmModelLabel(settings.llmModel, settings.llmAccounts ?? [], settings.llmModels) : "未选"} · 常用{" "}
         {pruneStarred(settings.llmStarred, settings.llmModels, settings.llmModel).length}
       </p>
+      <div className="h-60 shrink-0" aria-hidden />
         </>
       ) : null}
       <Modal open={saveOpen} onClose={() => setSaveOpen(false)} title="保存账号">
@@ -1583,6 +1586,7 @@ function ModelPicker({
   useEffect(() => {
     if (!open) return;
     place();
+    menu.current?.scrollIntoView({ block: "nearest" });
     let start: { x: number; y: number } | null = null;
     let downOutside = false;
     let moved = false;

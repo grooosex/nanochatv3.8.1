@@ -232,6 +232,10 @@ export function ModuleList({
   };
 
   const openMenu = (el: HTMLElement, kind: "mod" | "group", id: string) => {
+    if (menu?.kind === kind && menu.id === id) {
+      setMenu(null);
+      return;
+    }
     const r = el.getBoundingClientRect();
     const menuW = 132;
     const menuH = 168;

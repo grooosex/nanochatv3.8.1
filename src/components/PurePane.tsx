@@ -815,17 +815,6 @@ function FavSheet({
               type="button"
               className={`block w-full px-3 py-2.5 text-left ${menu.kind === "group" ? "border-t border-line" : ""}`}
               onClick={() => {
-                if (menu.kind === "fav") useApp.getState().deleteFavorite(menu.id);
-                else setAskDelete(menu.id);
-                setMenu(null);
-              }}
-            >
-              删除
-            </button>
-            <button
-              type="button"
-              className="block w-full border-t border-line px-3 py-2.5 text-left"
-              onClick={() => {
                 setMove({ kind: menu.kind, id: menu.id });
                 setMenu(null);
               }}
@@ -842,6 +831,17 @@ function FavSheet({
               }}
             >
               星标
+            </button>
+            <button
+              type="button"
+              className="block w-full border-t border-line px-3 py-2.5 text-left text-danger"
+              onClick={() => {
+                if (menu.kind === "fav") useApp.getState().deleteFavorite(menu.id);
+                else setAskDelete(menu.id);
+                setMenu(null);
+              }}
+            >
+              删除
             </button>
           </div>
         </div>
